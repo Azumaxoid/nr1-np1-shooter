@@ -1,7 +1,7 @@
 import React from 'react';
 import { BarChart, LineChart, HistogramChart, Spinner,
   HeadingText,Card, CardHeader, CardBody,
-  Grid, GridItem, Tile, TileGroup, Stack, StackItem, CollapsibleLayoutItem, Layout, LayoutItem,
+  Select, SelectItem, Tile, TileGroup, Stack, StackItem, CollapsibleLayoutItem, Layout, LayoutItem,
   Table, TableHeader, TableHeaderCell, TableRow, TableRowCell,
   NrqlQuery,
   PlatformStateContext, navigation } from 'nr1';
@@ -14,6 +14,10 @@ export default class Analyzer extends React.Component {
     super(props);
     this.state = {
       timeRange: '',
+      selectorFilter: {
+        key: '',
+        value: 'all'
+      },
       selected: {}
     }
   }
@@ -37,13 +41,48 @@ export default class Analyzer extends React.Component {
     if (this.state.selected.expression) {
       return ` AND ${this.state.selected.expression} = ${this.state.selected.label} `;
     }
-     return '';
+    return '';
+  }
+
+  getSelectorFilterCondition() {
+    if (this.state.selectorFilter.key !== '') {
+      return ` AND ${this.state.selectorFilter.key} = '${this.state.selectorFilter.value}' `;
+    }
+    return '';
+  }
+
+  _changeSelectorFilter(filter) {
+    this.setState({ selectorFilter: {
+        key: filter !== 'all' ? 'transactionType': '',
+        value: filter
+      }})
+  }
+  selectorFilter() {
+    return (<NrqlQuery
+      accountIds={[this.props.account]}
+      query={`FROM Transaction SELECT count(*) FACET transactionType WHERE entityGuid='${this.props.entityGuid}'and databaseCallCount >= 10 limit 30 ${this.state.timeRange}`}
+    >
+      {res => {
+        console.log(res)
+        const types = !res.data ? [] : res.data.map(res => {
+          return res.metadata.groups[1].value;
+        });
+        if (!res.data) {
+          return <Spinner/>
+        }
+        return (<Select label='Transaction Type:' labelInline={true} onChange={(evt, val)=>this._changeSelectorFilter(val)}
+                        value={this.state.selectorFilter.value}>
+          <SelectItem value="all">all</SelectItem>
+          {types.map(type => (<SelectItem value={type}>{type}</SelectItem>))}
+        </Select>)
+      }}
+    </NrqlQuery>);
   }
 
   selector() {
     return (<BarChart
-      accountId={this.props.account}
-      query={`SELECT max(databaseCallCount) FROM Transaction FACET name  WHERE entityGuid='${this.props.entityGuid}'and databaseCallCount >= 10 limit 30 ${this.state.timeRange}`}
+      accountIds={[this.props.account]}
+      query={`SELECT max(databaseCallCount) FROM Transaction FACET name  WHERE entityGuid='${this.props.entityGuid}'and databaseCallCount >= 10 ${this.getSelectorFilterCondition()} limit 30 ${this.state.timeRange}`}
       fullWidth
       fullHeight
       onClickBar={(d) => {console.log(d.metadata.facet); this.changeSelector(d.metadata.facet)}}
@@ -55,7 +94,7 @@ export default class Analyzer extends React.Component {
       <CardHeader title="Query count Trend"/>
       <CardBody>
         <LineChart
-          accountId={this.props.account}
+          accountIds={[this.props.account]}
           query={`SELECT max(databaseCallCount) FROM Transaction FACET name  WHERE entityGuid='${this.props.entityGuid}'and databaseCallCount >= 10 ${this.getSelectorCondition()} limit 30 TIMESERIES ${this.state.timeRange}`}
           fullWidth
         />
@@ -68,7 +107,7 @@ export default class Analyzer extends React.Component {
       <CardHeader title="Query count Histogram"/>
       <CardBody>
         <HistogramChart
-          accountId={this.props.account}
+          accountIds={[this.props.account]}
           query={`SELECT histogram(databaseCallCount, width:100, buckets:5) FROM Transaction  WHERE entityGuid='${this.props.entityGuid}' and databaseCallCount >= 10 ${this.getSelectorCondition()} ${this.state.timeRange}`}
           fullWidth
         />
@@ -80,7 +119,7 @@ export default class Analyzer extends React.Component {
     const {timeRange} = this.state;
     const {account, entityGuid} = this.props;
     return (<NrqlQuery
-      accountId={this.props.account}
+      accountIds={[this.props.account]}
       query={`SELECT max(databaseCallCount) FROM Transaction FACET timestamp, entityGuid, traceId,name  WHERE entityGuid='${entityGuid}'and databaseCallCount >= 10 ${this.getSelectorCondition()} limit 30 ${timeRange}`}
     >
       {({data}) => {
@@ -88,7 +127,7 @@ export default class Analyzer extends React.Component {
           // change colors to a nice pink.
           const traceIds = data.map(({metadata}) => metadata.groups.find(g => g.name === 'traceId').value).map(id => `'${id}'`);
           return <NrqlQuery
-            accountId={account}
+            accountIds={[account]}
             query={`FROM Span SELECT count(*) as cnt FACET traceId, db.statement limit 500 WHERE traceId in (${traceIds}) ${timeRange}`}
           >
             {res => {
@@ -172,10 +211,12 @@ export default class Analyzer extends React.Component {
         <StackItem fullWidt>
         <Layout fullHeight>
           <CollapsibleLayoutItem
+            className={'filter'}
             triggerType={CollapsibleLayoutItem.TRIGGER_TYPE.INBUILT}
             type={LayoutItem.TYPE.SPLIT_LEFT}
-            sizeType={LayoutItem.SIZE_TYPE.SMALL}
+            sizeType={LayoutItem.SIZE_TYPE.MEDIUM}
           >
+            {this.selectorFilter()}
             {this.selector()}
           </CollapsibleLayoutItem>
           <LayoutItem>
